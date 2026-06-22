@@ -4,8 +4,8 @@ import jetbrains.buildServer.agent.java.AgentHostJavaExecutableProvider
 import jetbrains.buildServer.agent.java.DockerJavaExecutableProvider
 import jetbrains.buildServer.agent.runner.*
 import jetbrains.buildServer.bazel.BazelConstants.PARAM_INTEGRATION_MODE
-import jetbrains.buildServer.bazel.BazelConstants.PARAM_REPORT_TARGET_LOG_TO_BUILD_LOG_SETTING_ENABLED
 import jetbrains.buildServer.bazel.BazelConstants.PARAM_REPORT_TARGET_LOG_TO_BUILD_LOG
+import jetbrains.buildServer.bazel.BazelConstants.PARAM_REPORT_TARGET_LOG_TO_BUILD_LOG_SETTING_ENABLED
 import jetbrains.buildServer.bazel.BazelConstants.PARAM_VERBOSITY
 import jetbrains.buildServer.util.StringUtil
 import java.io.File

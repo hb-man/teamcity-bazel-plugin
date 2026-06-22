@@ -42,9 +42,10 @@ class BazelParametersProvider {
         get() = BazelConstants.PARAM_REPORT_TARGET_LOG_TO_BUILD_LOG
 
     val reportTargetLogToBuildLogSettingEnabled: Boolean
-        get() = TeamCityProperties.getBooleanOrTrue(
-            BazelConstants.TEAMCITY_PROPERTY_REPORT_TARGET_LOG_TO_BUILD_LOG_SETTING_ENABLED,
-        )
+        get() =
+            TeamCityProperties.getBooleanOrTrue(
+                BazelConstants.TEAMCITY_PROPERTY_REPORT_TARGET_LOG_TO_BUILD_LOG_SETTING_ENABLED,
+            )
 
     val integrationModes: List<IntegrationMode>
         get() = IntegrationMode.values().toList()
