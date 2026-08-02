@@ -5,13 +5,19 @@ import bazel.atLeast
 import bazel.handlers.BuildEventHandler
 import bazel.handlers.BuildEventHandlerContext
 import bazel.messages.CommandNameContext
+import bazel.messages.PendingInvocationDiagnostics
 
 class BuildStartedHandler(
     private val context: CommandNameContext,
+    private val pendingDiagnostics: PendingInvocationDiagnostics,
 ) : BuildEventHandler {
     override fun handle(ctx: BuildEventHandlerContext): Boolean {
         if (!ctx.event.hasStarted()) {
             return false
+        }
+
+        if (!pendingDiagnostics.discardIfRetriablyFailed(ctx.writer)) {
+            pendingDiagnostics.flush(ctx.writer)
         }
 
         val event = ctx.event.started

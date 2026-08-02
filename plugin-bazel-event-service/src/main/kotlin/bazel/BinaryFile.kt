@@ -13,13 +13,25 @@ class BinaryFile(
     private val _reportTargetLogToBuildLog: Boolean,
     private val _buildEventHandlerChain: BuildEventHandlerChain,
 ) {
-    fun read(): AutoCloseable =
-        _binaryStream.create(_eventFile).start {
-            when (it) {
-                is BinaryFileEventStream.Result.Error -> onError(it.throwable)
-                is BinaryFileEventStream.Result.Event -> onEvent(it)
+    fun read(): AutoCloseable {
+        val stream =
+            _binaryStream.create(_eventFile).start {
+                when (it) {
+                    is BinaryFileEventStream.Result.Error -> onError(it.throwable)
+                    is BinaryFileEventStream.Result.Event -> onEvent(it)
+                }
+            }
+
+        return AutoCloseable {
+            // Closing joins the reader thread, so the flush sees the whole stream. It runs even if
+            // closing fails, or a failure there would take the buffered diagnostics down with it.
+            try {
+                stream.close()
+            } finally {
+                _buildEventHandlerChain.flushPendingDiagnostics(_messageWriter)
             }
         }
+    }
 
     private fun onError(err: Throwable) {
         _messageWriter.error("Error during binary file read", err.toString())

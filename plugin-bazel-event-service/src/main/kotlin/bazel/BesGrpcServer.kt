@@ -16,16 +16,28 @@ class BesGrpcServer(
 ) {
     var hasStarted = false
 
-    fun start() =
-        _grpcServer
-            .start(
-                BesGrpcServerEventStream(_messageWriter) {
-                    when (it) {
-                        is BesGrpcServerEventStream.Result.Event -> onEvent(it)
-                        is BesGrpcServerEventStream.Result.Error -> onError(it.throwable)
-                    }
-                },
-            )
+    fun start(): AutoCloseable {
+        val server =
+            _grpcServer
+                .start(
+                    BesGrpcServerEventStream(_messageWriter) {
+                        when (it) {
+                            is BesGrpcServerEventStream.Result.Event -> onEvent(it)
+                            is BesGrpcServerEventStream.Result.Error -> onError(it.throwable)
+                        }
+                    },
+                )
+
+        return AutoCloseable {
+            // Shutting down awaits termination, so the flush sees the whole stream. It runs even if
+            // shutdown fails, or a failure there would take the buffered diagnostics down with it.
+            try {
+                server.close()
+            } finally {
+                _buildEventHandler.flushPendingDiagnostics(_messageWriter)
+            }
+        }
+    }
 
     private fun onError(err: Throwable) {
         _messageWriter.error("BES Server onError", err.toString())
