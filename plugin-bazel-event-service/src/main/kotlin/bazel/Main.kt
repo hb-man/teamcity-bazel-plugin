@@ -45,7 +45,11 @@ private fun runBinaryFileMode(
                 eventFile = options.eventFile,
             ).run()
         finalExitCode = result.exitCode
-        result.errors.forEach { messageWriter.error(it) }
+        // These accumulate across every attempt, including ones Bazel restarted, so reporting them
+        // on success would contradict Bazel's own verdict.
+        if (finalExitCode != 0) {
+            result.errors.forEach { messageWriter.error(it) }
+        }
     }
     exit(finalExitCode)
 }
@@ -77,7 +81,7 @@ private fun runBesGrpcServerMode(
                     ).run()
                 finalExitCode = result.exitCode
 
-                if (!server.hasStarted) {
+                if (!server.hasStarted && finalExitCode != 0) {
                     result.errors.forEach { messageWriter.error(it) }
                 }
             }
