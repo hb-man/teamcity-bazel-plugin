@@ -35,6 +35,12 @@ class BinaryFileEventStream(
         data class Error(
             val throwable: Throwable,
         ) : Result
+
+        /**
+         * Bazel replaced the stream in the event file, which it only does when it restarts an
+         * invocation. Everything read so far belongs to the attempt that was superseded.
+         */
+        object StreamRestarted : Result
     }
 
     class Listener(
@@ -93,7 +99,10 @@ class BinaryFileEventStream(
          * Reopening rather than rewinding is what covers a replaced file: the channel would
          * otherwise stay on the inode that was unlinked and never see another byte.
          */
-        private fun reopenIfRestarted(channel: FileChannel): FileChannel {
+        private fun reopenIfRestarted(
+            channel: FileChannel,
+            onEvent: (Result) -> Unit,
+        ): FileChannel {
             val beingRead = streamPrefix
             if (beingRead == null) {
                 streamPrefix = streamPrefixOf(channel)
@@ -109,6 +118,7 @@ class BinaryFileEventStream(
             runCatching { channel.close() }
             val reopened = FileChannel.open(binaryFile, StandardOpenOption.READ)
             streamPrefix = streamPrefixOf(reopened)
+            onEvent(Result.StreamRestarted)
             return reopened
         }
 
@@ -125,7 +135,7 @@ class BinaryFileEventStream(
             val watch = FileSystems.getDefault().newWatchService()
             var channel: FileChannel? = null
 
-            fun pump(current: FileChannel): FileChannel = reopenIfRestarted(current).also { readBazelEvents(onEvent, it) }
+            fun pump(current: FileChannel): FileChannel = reopenIfRestarted(current, onEvent).also { readBazelEvents(onEvent, it) }
 
             try {
                 binaryFile.parent.register(watch, ENTRY_CREATE, ENTRY_MODIFY)

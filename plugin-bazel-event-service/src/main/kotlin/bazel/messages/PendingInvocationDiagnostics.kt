@@ -51,7 +51,8 @@ class PendingInvocationDiagnostics {
         return true
     }
 
-    private fun discardSuperseded(writer: MessageWriter) {
+    /** For a restart established outside the event stream, which needs no exit code to confirm it. */
+    fun discardSuperseded(writer: MessageWriter) {
         val discarded = synchronized(pending) { (pending.size + dropped).also { reset() } }
         if (discarded > 0) {
             writer.warning(

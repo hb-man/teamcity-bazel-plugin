@@ -105,4 +105,7 @@ class BuildEventHandlerChain : BuildEventHandler {
 
     /** Call once the event stream is over: only then is the last invocation known to be the last. */
     fun flushPendingDiagnostics(writer: MessageWriter) = pendingDiagnostics.flush(writer)
+
+    /** For a restart established outside the event stream, where no second BuildStarted arrives. */
+    fun onInvocationSuperseded(writer: MessageWriter) = pendingDiagnostics.discardSuperseded(writer)
 }

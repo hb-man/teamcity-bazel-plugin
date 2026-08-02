@@ -19,6 +19,7 @@ class BinaryFile(
                 when (it) {
                     is BinaryFileEventStream.Result.Error -> onError(it.throwable)
                     is BinaryFileEventStream.Result.Event -> onEvent(it)
+                    is BinaryFileEventStream.Result.StreamRestarted -> onStreamRestarted()
                 }
             }
 
@@ -36,6 +37,12 @@ class BinaryFile(
     private fun onError(err: Throwable) {
         _messageWriter.error("Error during binary file read", err.toString())
     }
+
+    /**
+     * Proof of a restart that cannot be missed, unlike the superseded attempt's `BuildFinished`
+     * event, which the rewrite can overwrite before the reader gets to it.
+     */
+    private fun onStreamRestarted() = _buildEventHandlerChain.onInvocationSuperseded(_messageWriter)
 
     private fun onEvent(event: BinaryFileEventStream.Result.Event) {
         val messagePrefix = MessagePrefix.build(_verbosity, event.sequenceNumber)

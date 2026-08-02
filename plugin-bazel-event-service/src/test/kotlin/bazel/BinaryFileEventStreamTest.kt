@@ -17,6 +17,7 @@ import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 class BinaryFileEventStreamTest {
     private lateinit var tempDir: Path
@@ -236,6 +237,7 @@ class BinaryFileEventStreamTest {
 
             reader.awaitTrailingEvents(7)
             reader.assertNoErrors()
+            reader.assertSawRestart()
         }
     }
 
@@ -264,6 +266,7 @@ class BinaryFileEventStreamTest {
 
             reader.awaitTrailingEvents(11, 12, 13)
             reader.assertNoErrors()
+            reader.assertSawRestart()
         }
     }
 
@@ -305,6 +308,7 @@ class BinaryFileEventStreamTest {
 
             reader.awaitTrailingEvents(42)
             reader.assertNoErrors()
+            reader.assertSawRestart()
         }
     }
 
@@ -328,6 +332,7 @@ class BinaryFileEventStreamTest {
 
             reader.awaitTrailingEvents(8, 9)
             reader.assertNoErrors()
+            reader.assertSawRestart()
         }
     }
 
@@ -354,6 +359,7 @@ class BinaryFileEventStreamTest {
             listOf(21, 22),
             "The replacement stream must still be read on the final drain, got: ${reader.opaqueCounts}",
         )
+        reader.assertSawRestart()
         reader.assertNoErrors()
     }
 
@@ -368,6 +374,7 @@ class BinaryFileEventStreamTest {
     ) : AutoCloseable {
         private val events = Collections.synchronizedList(mutableListOf<BinaryFileEventStream.Result.Event>())
         private val errors = Collections.synchronizedList(mutableListOf<Throwable>())
+        private val restarts = AtomicInteger()
         private val arrived = Semaphore(0)
 
         private val closeable =
@@ -378,6 +385,7 @@ class BinaryFileEventStreamTest {
                         arrived.release()
                     }
                     is BinaryFileEventStream.Result.Error -> errors.add(result.throwable)
+                    is BinaryFileEventStream.Result.StreamRestarted -> restarts.incrementAndGet()
                 }
             }
 
@@ -400,6 +408,8 @@ class BinaryFileEventStreamTest {
             }
             fail("Timed out waiting for events ending in $wanted, got: $opaqueCounts")
         }
+
+        fun assertSawRestart() = assertTrue(restarts.get() > 0, "The new stream must be signalled as a restart")
 
         fun assertNoErrors() {
             val reported = synchronized(errors) { errors.toList() }
