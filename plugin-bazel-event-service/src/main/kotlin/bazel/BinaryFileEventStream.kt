@@ -144,7 +144,6 @@ class BinaryFileEventStream(
                     if (channel == null && binaryFile.exists()) {
                         messageWriter.trace("Opening \"$binaryFile\" for reading...")
                         channel = FileChannel.open(binaryFile, StandardOpenOption.READ)
-                        streamPrefix = streamPrefixOf(channel)
                     } else if (channel != null) {
                         channel = pump(channel)
                     }
