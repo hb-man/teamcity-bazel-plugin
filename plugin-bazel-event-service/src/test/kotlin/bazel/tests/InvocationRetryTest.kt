@@ -100,6 +100,43 @@ class InvocationRetryTest {
     }
 
     /**
+     * `--experimental_remote_cache_eviction_retries` is finite. Once the stream ends on an attempt
+     * that failed the way Bazel retries, the retries were exhausted and the failure is the build's.
+     */
+    @Test
+    fun reportsTheLastAttemptWhenRetriesAreExhausted() {
+        handle(buildStarted())
+        handle(failedAction())
+        handle(buildFinished(REMOTE_CACHE_EVICTED, "REMOTE_CACHE_EVICTED"))
+
+        handle(buildStarted())
+        handle(failedAction())
+        handle(buildFinished(REMOTE_CACHE_EVICTED, "REMOTE_CACHE_EVICTED"))
+        pendingDiagnostics.flush(writer)
+
+        assertEquals(
+            messages.count { it.contains("compilationStarted") },
+            1,
+            "Only the last attempt's failure should be reported, got: $messages",
+        )
+        val failures = messages.filter { it.contains("Build failed") }
+        assertEquals(
+            failures.size,
+            1,
+            "The exhausted attempt's exit code should be reported once, got: $messages",
+        )
+        assertTrue(
+            failures.single().contains("REMOTE_CACHE_EVICTED"),
+            "The reported exit code should be the one the retries could not get past, got: $failures",
+        )
+        assertEquals(
+            messages.count { it.contains("Bazel restarted the invocation") },
+            1,
+            "Only the first of the two attempts was superseded, got: $messages",
+        )
+    }
+
+    /**
      * A BES server can serve several builds before it is closed, so a following BuildStarted is
      * only a retry when the previous invocation ended the way Bazel retries. Anything else is a
      * separate run whose failures still have to be reported.

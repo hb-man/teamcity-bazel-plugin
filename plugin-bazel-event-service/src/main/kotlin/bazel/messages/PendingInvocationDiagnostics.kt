@@ -19,56 +19,104 @@ package bazel.messages
  * accumulate their output on the heap.
  */
 class PendingInvocationDiagnostics {
+    private val lock = Any()
     private val pending = mutableListOf<Diagnostic>()
     private var bufferedDetailChars = 0
     private var dropped = 0
-    private var retriablyFailed = false
+    private var bazelRetries = false
 
     /** [details] is only evaluated when there is room for it, since producing it reads files. */
     fun addCompilationError(
         summary: String,
         details: () -> String,
-    ) = add { Diagnostic.CompilationError(summary, charged(details())) }
+    ) = synchronized(lock) { buffer { Diagnostic.CompilationError(summary, charged(details())) } }
 
     fun addErrorMessage(
         text: String,
         hasPrefix: Boolean = true,
-    ) = add { Diagnostic.ErrorMessage(charged(text), hasPrefix) }
-
-    fun recordExitCode(code: Int) {
-        synchronized(pending) { retriablyFailed = code == REMOTE_CACHE_EVICTED }
-    }
+    ) = synchronized(lock) { buffer { Diagnostic.ErrorMessage(charged(text), hasPrefix) } }
 
     /**
-     * Drops the diagnostics of an invocation that ended the way Bazel retries.
-     *
-     * Returns false when it ended some other way, which makes whatever follows a separate build
-     * rather than a retry, and its diagnostics something to report rather than lose.
+     * For a `BuildFinished` carrying the exit code Bazel retries: [text] is kept in case this
+     * attempt turns out to be the last one, and the flag marks a `BuildStarted` that follows as a
+     * retry rather than as another build.
      */
-    fun discardIfRetriablyFailed(writer: MessageWriter): Boolean {
-        synchronized(pending) { if (!retriablyFailed) return false }
-        discardSuperseded(writer)
-        return true
+    fun addRetriableFailure(text: String) =
+        synchronized(lock) {
+            bazelRetries = true
+            buffer { Diagnostic.ErrorMessage(charged(text), hasPrefix = true) }
+        }
+
+    /**
+     * The previous invocation is over. If it ended the way Bazel retries, this one supersedes it and
+     * its diagnostics are dropped; otherwise it was a separate build and they are reported now.
+     */
+    fun onInvocationStarted(writer: MessageWriter) {
+        val buffered = take()
+        if (buffered.bazelRetries) {
+            discard(buffered, writer)
+        } else {
+            report(buffered, writer)
+        }
     }
 
     /** For a restart established outside the event stream, which needs no exit code to confirm it. */
-    fun discardSuperseded(writer: MessageWriter) {
-        val discarded = synchronized(pending) { (pending.size + dropped).also { reset() } }
-        if (discarded > 0) {
+    fun discardSuperseded(writer: MessageWriter) = discard(take(), writer)
+
+    /**
+     * Call once the event stream is over: only then is the last invocation known to be the last.
+     *
+     * The retriable flag is ignored on purpose — a stream that ends after such an attempt means the
+     * retries were exhausted, so the failure is Bazel's own verdict.
+     */
+    fun flush(writer: MessageWriter) = report(take(), writer)
+
+    private fun take(): Buffered =
+        synchronized(lock) {
+            Buffered(pending.toList(), dropped, bazelRetries).also { reset() }
+        }
+
+    private fun discard(
+        buffered: Buffered,
+        writer: MessageWriter,
+    ) {
+        if (buffered.count > 0) {
             writer.warning(
                 "Bazel restarted the invocation; " +
-                    "$discarded failure(s) reported by the superseded attempt are ignored.",
+                    "${buffered.count} failure(s) reported by the superseded attempt are ignored.",
             )
         }
     }
 
-    private inline fun add(diagnostic: () -> Diagnostic) {
-        synchronized(pending) {
-            if (pending.size >= MAX_BUFFERED_REPORTS) {
-                dropped++
-            } else {
-                pending.add(diagnostic())
+    private fun report(
+        buffered: Buffered,
+        writer: MessageWriter,
+    ) {
+        buffered.diagnostics.forEach {
+            when (it) {
+                is Diagnostic.CompilationError -> {
+                    writer.compilationStarted(it.summary)
+                    writer.error(it.details, hasPrefix = false)
+                    writer.compilationFinished(it.summary)
+                }
+
+                is Diagnostic.ErrorMessage -> writer.error(it.text, hasPrefix = it.hasPrefix)
             }
+        }
+
+        if (buffered.dropped > 0) {
+            writer.warning(
+                "${buffered.dropped} further failure(s) were not reported: " +
+                    "more than $MAX_BUFFERED_REPORTS failures in a single invocation.",
+            )
+        }
+    }
+
+    private inline fun buffer(diagnostic: () -> Diagnostic) {
+        if (pending.size >= MAX_BUFFERED_REPORTS) {
+            dropped++
+        } else {
+            pending.add(diagnostic())
         }
     }
 
@@ -85,40 +133,20 @@ class PendingInvocationDiagnostics {
         return kept
     }
 
-    fun flush(writer: MessageWriter) {
-        val diagnostics: List<Diagnostic>
-        val notReported: Int
-        synchronized(pending) {
-            diagnostics = pending.toList()
-            notReported = dropped
-            reset()
-        }
-
-        diagnostics.forEach {
-            when (it) {
-                is Diagnostic.CompilationError -> {
-                    writer.compilationStarted(it.summary)
-                    writer.error(it.details, hasPrefix = false)
-                    writer.compilationFinished(it.summary)
-                }
-
-                is Diagnostic.ErrorMessage -> writer.error(it.text, hasPrefix = it.hasPrefix)
-            }
-        }
-
-        if (notReported > 0) {
-            writer.warning(
-                "$notReported further failure(s) were not reported: " +
-                    "more than $MAX_BUFFERED_REPORTS failures in a single invocation.",
-            )
-        }
-    }
-
     private fun reset() {
         pending.clear()
         bufferedDetailChars = 0
         dropped = 0
-        retriablyFailed = false
+        bazelRetries = false
+    }
+
+    private class Buffered(
+        val diagnostics: List<Diagnostic>,
+        val dropped: Int,
+        val bazelRetries: Boolean,
+    ) {
+        val count: Int
+            get() = diagnostics.size + dropped
     }
 
     private sealed interface Diagnostic {
@@ -135,7 +163,6 @@ class PendingInvocationDiagnostics {
     }
 
     private companion object {
-        const val REMOTE_CACHE_EVICTED = 39
         const val MAX_BUFFERED_REPORTS = 500
         const val MAX_BUFFERED_DETAIL_CHARS = 4 * 1024 * 1024
         const val TRUNCATION_MARKER = "\n<truncated>"

@@ -16,9 +16,7 @@ class BuildStartedHandler(
             return false
         }
 
-        if (!pendingDiagnostics.discardIfRetriablyFailed(ctx.writer)) {
-            pendingDiagnostics.flush(ctx.writer)
-        }
+        pendingDiagnostics.onInvocationStarted(ctx.writer)
 
         val event = ctx.event.started
         context.commandName = event.command
