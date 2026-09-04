@@ -29,12 +29,12 @@ class PendingInvocationDiagnostics {
     fun addCompilationError(
         summary: String,
         details: () -> String,
-    ) = synchronized(lock) { buffer { Diagnostic.CompilationError(summary, charged(details())) } }
+    ) = synchronized(lock) { buffer { Diagnostic.CompilationError(summary, charged(details)) } }
 
     fun addErrorMessage(
         text: String,
         hasPrefix: Boolean = true,
-    ) = synchronized(lock) { buffer { Diagnostic.ErrorMessage(charged(text), hasPrefix) } }
+    ) = synchronized(lock) { buffer { Diagnostic.ErrorMessage(charged { text }, hasPrefix) } }
 
     /**
      * For a `BuildFinished` carrying the exit code Bazel retries: [text] is kept in case this
@@ -44,7 +44,7 @@ class PendingInvocationDiagnostics {
     fun addRetriableFailure(text: String) =
         synchronized(lock) {
             bazelRetries = true
-            buffer { Diagnostic.ErrorMessage(charged(text), hasPrefix = true) }
+            buffer { Diagnostic.ErrorMessage(charged { text }, hasPrefix = true) }
         }
 
     /**
@@ -120,15 +120,21 @@ class PendingInvocationDiagnostics {
         }
     }
 
-    /** Charges [text] against the shared budget, truncating once it is spent. */
-    private fun charged(text: String): String {
+    /**
+     * Charges what [text] produces against the shared budget, truncating once it is spent.
+     *
+     * Once the budget is gone [text] is not called at all, which is what spares [addCompilationError]
+     * the reading of output files whose content it could not keep anyway.
+     */
+    private fun charged(text: () -> String): String {
         val room = MAX_BUFFERED_DETAIL_CHARS - bufferedDetailChars
-        val kept =
-            when {
-                room <= 0 -> OMITTED_DETAILS
-                text.length > room -> text.take(room) + TRUNCATION_MARKER
-                else -> text
-            }
+        if (room <= 0) {
+            bufferedDetailChars += OMITTED_DETAILS.length
+            return OMITTED_DETAILS
+        }
+
+        val produced = text()
+        val kept = if (produced.length > room) produced.take(room) + TRUNCATION_MARKER else produced
         bufferedDetailChars += kept.length
         return kept
     }
