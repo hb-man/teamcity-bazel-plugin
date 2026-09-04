@@ -5,6 +5,7 @@ import bazel.buildEvent
 import bazel.handlers.BuildEventHandlerChain
 import bazel.handlers.BuildEventHandlerContext
 import bazel.messages.MessageWriter
+import bazel.messages.PendingInvocationDiagnostics
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
@@ -20,13 +21,15 @@ import org.testng.annotations.Test
 class InvocationRetryTest {
     private val messages = mutableListOf<String>()
     private lateinit var writer: MessageWriter
+    private lateinit var pendingDiagnostics: PendingInvocationDiagnostics
     private lateinit var chain: BuildEventHandlerChain
 
     @BeforeMethod
     fun setUp() {
         messages.clear()
         writer = MessageWriter(messagePrefix = "") { messages.add(it.toString()) }
-        chain = BuildEventHandlerChain()
+        pendingDiagnostics = PendingInvocationDiagnostics()
+        chain = BuildEventHandlerChain(pendingDiagnostics)
     }
 
     @Test
@@ -38,7 +41,7 @@ class InvocationRetryTest {
         // Bazel retries: a second BuildStarted supersedes everything the first attempt reported
         handle(buildStarted())
         handle(buildFinished(0, "SUCCESS"))
-        chain.flushPendingDiagnostics(writer)
+        pendingDiagnostics.flush(writer)
 
         assertFalse(
             messages.any { it.contains("compilationStarted") },
@@ -61,7 +64,7 @@ class InvocationRetryTest {
 
         handle(buildStarted())
         handle(buildFinished(1, "BUILD_FAILURE"))
-        chain.flushPendingDiagnostics(writer)
+        pendingDiagnostics.flush(writer)
 
         assertFalse(
             messages.any { it.contains("REMOTE_CACHE_EVICTED") },
@@ -83,7 +86,7 @@ class InvocationRetryTest {
         handle(buildStarted())
         handle(failedAction())
         handle(buildFinished(1, "BUILD_FAILURE"))
-        chain.flushPendingDiagnostics(writer)
+        pendingDiagnostics.flush(writer)
 
         assertEquals(
             messages.count { it.contains("compilationStarted") },
@@ -110,7 +113,7 @@ class InvocationRetryTest {
         // A second, independent build starts on the same server
         handle(buildStarted())
         handle(buildFinished(0, "SUCCESS"))
-        chain.flushPendingDiagnostics(writer)
+        pendingDiagnostics.flush(writer)
 
         assertEquals(
             messages.count { it.contains("compilationStarted") },
@@ -128,12 +131,42 @@ class InvocationRetryTest {
         handle(buildStarted())
         handle(failedAction())
         handle(buildFinished(1, "BUILD_FAILURE"))
-        chain.flushPendingDiagnostics(writer)
+        pendingDiagnostics.flush(writer)
 
         assertEquals(
             messages.count { it.contains("compilationStarted") },
             1,
             "A failure of the only attempt must be reported, got: $messages",
+        )
+    }
+
+    /**
+     * In binary-file mode the superseded attempt's `BuildFinished` can be overwritten before the
+     * reader reaches it, so the restart is established from the replaced stream instead.
+     */
+    @Test
+    fun dropsAnAttemptWhoseStreamWasReplacedBeforeItsExitCodeWasRead() {
+        handle(buildStarted())
+        handle(failedAction())
+
+        pendingDiagnostics.discardSuperseded(writer)
+
+        handle(buildStarted())
+        handle(buildFinished(0, "SUCCESS"))
+        pendingDiagnostics.flush(writer)
+
+        assertFalse(
+            messages.any { it.contains("compilationStarted") },
+            "A superseded attempt must not produce a compilation error, got: $messages",
+        )
+        assertEquals(
+            messages.count { it.contains("Bazel restarted the invocation") },
+            1,
+            "Expected one warning about the superseded attempt, got: $messages",
+        )
+        assertFalse(
+            messages.any { it.contains("Build failed") },
+            "The attempt that replaced it succeeded, got: $messages",
         )
     }
 

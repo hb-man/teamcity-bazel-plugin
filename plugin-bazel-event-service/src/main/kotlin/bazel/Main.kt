@@ -3,6 +3,7 @@ package bazel
 import bazel.handlers.BuildEventHandlerChain
 import bazel.handlers.GrpcEventHandlerChain
 import bazel.messages.MessageWriter
+import bazel.messages.PendingInvocationDiagnostics
 import kotlin.system.exitProcess
 
 fun main(args: Array<String>) {
@@ -29,13 +30,15 @@ private fun runBinaryFileMode(
     messageWriter: MessageWriter,
 ) {
     var finalExitCode = 0
+    val pendingDiagnostics = PendingInvocationDiagnostics()
     BinaryFile(
         messageWriter,
         options.eventFile!!,
         options.verbosity,
         BinaryFileEventStream(messageWriter),
         options.reportTargetLogToBuildLog,
-        BuildEventHandlerChain(),
+        BuildEventHandlerChain(pendingDiagnostics),
+        pendingDiagnostics,
     ).read().use {
         val result =
             BazelRunner(
@@ -60,13 +63,15 @@ private fun runBesGrpcServerMode(
 ) {
     var finalExitCode = 0
     val grpcServer = GrpcServer(messageWriter, options.port)
+    val pendingDiagnostics = PendingInvocationDiagnostics()
     val server =
         BesGrpcServer(
             messageWriter,
             grpcServer,
             options.verbosity,
             options.reportTargetLogToBuildLog,
-            GrpcEventHandlerChain(),
+            GrpcEventHandlerChain(BuildEventHandlerChain(pendingDiagnostics)),
+            pendingDiagnostics,
         )
 
     try {

@@ -10,11 +10,10 @@ import bazel.handlers.grpc.InvocationAttemptFinishedHandler
 import bazel.handlers.grpc.InvocationAttemptStartedHandler
 import bazel.handlers.grpc.NotProcessedEventHandler
 import bazel.handlers.grpc.PackedBazelEventHandler
-import bazel.messages.MessageWriter
 
-class GrpcEventHandlerChain : GrpcEventHandler {
-    private val buildEventHandlerChain = BuildEventHandlerChain()
-
+class GrpcEventHandlerChain(
+    buildEventHandlerChain: BuildEventHandlerChain,
+) : GrpcEventHandler {
     private val handlers =
         listOf(
             BuildEnqueuedHandler(),
@@ -35,6 +34,4 @@ class GrpcEventHandlerChain : GrpcEventHandler {
 
         return true
     }
-
-    fun flushPendingDiagnostics(writer: MessageWriter) = buildEventHandlerChain.flushPendingDiagnostics(writer)
 }

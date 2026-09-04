@@ -30,15 +30,15 @@ import bazel.handlers.build.UnstructuredCommandLineHandler
 import bazel.handlers.build.WorkspaceConfigHandler
 import bazel.handlers.build.WorkspaceStatusHandler
 import bazel.messages.CommandNameContext
-import bazel.messages.MessageWriter
 import bazel.messages.PendingInvocationDiagnostics
 import bazel.messages.TargetRegistry
 
-class BuildEventHandlerChain : BuildEventHandler {
+class BuildEventHandlerChain(
+    pendingDiagnostics: PendingInvocationDiagnostics,
+) : BuildEventHandler {
     private val targetRegistry = TargetRegistry()
     private val commandNameContext = CommandNameContext()
     private val fileSystemService = FileSystemService()
-    private val pendingDiagnostics = PendingInvocationDiagnostics()
 
     private val handlers: List<BuildEventHandler> =
         listOf(
@@ -102,10 +102,4 @@ class BuildEventHandlerChain : BuildEventHandler {
 
         return true
     }
-
-    /** Call once the event stream is over: only then is the last invocation known to be the last. */
-    fun flushPendingDiagnostics(writer: MessageWriter) = pendingDiagnostics.flush(writer)
-
-    /** For a restart established outside the event stream, where no second BuildStarted arrives. */
-    fun onInvocationSuperseded(writer: MessageWriter) = pendingDiagnostics.discardSuperseded(writer)
 }

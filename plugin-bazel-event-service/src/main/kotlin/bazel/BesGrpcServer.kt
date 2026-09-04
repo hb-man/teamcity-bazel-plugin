@@ -4,6 +4,7 @@ import bazel.handlers.GrpcEventHandlerChain
 import bazel.handlers.GrpcEventHandlerContext
 import bazel.messages.MessagePrefix
 import bazel.messages.MessageWriter
+import bazel.messages.PendingInvocationDiagnostics
 import jetbrains.buildServer.messages.serviceMessages.ServiceMessage
 import java.util.Date
 
@@ -13,6 +14,7 @@ class BesGrpcServer(
     private val _verbosity: Verbosity,
     private val _reportTargetLogToBuildLog: Boolean,
     private val _buildEventHandler: GrpcEventHandlerChain,
+    private val _pendingDiagnostics: PendingInvocationDiagnostics,
 ) {
     var hasStarted = false
 
@@ -34,7 +36,7 @@ class BesGrpcServer(
             try {
                 server.close()
             } finally {
-                _buildEventHandler.flushPendingDiagnostics(_messageWriter)
+                _pendingDiagnostics.flush(_messageWriter)
             }
         }
     }

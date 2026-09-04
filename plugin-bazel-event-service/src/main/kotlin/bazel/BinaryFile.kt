@@ -12,6 +12,7 @@ class BinaryFile(
     private val _binaryStream: BinaryFileEventStream,
     private val _reportTargetLogToBuildLog: Boolean,
     private val _buildEventHandlerChain: BuildEventHandlerChain,
+    private val _pendingDiagnostics: PendingInvocationDiagnostics,
 ) {
     fun read(): AutoCloseable {
         val stream =
@@ -29,7 +30,7 @@ class BinaryFile(
             try {
                 stream.close()
             } finally {
-                _buildEventHandlerChain.flushPendingDiagnostics(_messageWriter)
+                _pendingDiagnostics.flush(_messageWriter)
             }
         }
     }
@@ -42,7 +43,7 @@ class BinaryFile(
      * Proof of a restart that cannot be missed, unlike the superseded attempt's `BuildFinished`
      * event, which the rewrite can overwrite before the reader gets to it.
      */
-    private fun onStreamRestarted() = _buildEventHandlerChain.onInvocationSuperseded(_messageWriter)
+    private fun onStreamRestarted() = _pendingDiagnostics.discardSuperseded(_messageWriter)
 
     private fun onEvent(event: BinaryFileEventStream.Result.Event) {
         val messagePrefix = MessagePrefix.build(_verbosity, event.sequenceNumber)
