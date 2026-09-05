@@ -43,7 +43,7 @@ class TargetCompletedHandler(
             }
 
             if (!completed.success) {
-                pendingDiagnostics.addErrorMessage(description, hasPrefix = false)
+                pendingDiagnostics.addErrorMessage(ctx.writer, description, hasPrefix = false)
             }
         }
 

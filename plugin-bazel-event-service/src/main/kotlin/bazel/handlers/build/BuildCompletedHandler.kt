@@ -31,7 +31,7 @@ class BuildCompletedHandler(
             3 -> ctx.writer.message("Build completed with failed test(s), exit code ${event.exitCode}")
             4 -> ctx.writer.message("No tests were found, exit code ${event.exitCode}")
             // The only exit code a Bazel-driven retry follows, so the only one worth withholding.
-            REMOTE_CACHE_EVICTED -> pendingDiagnostics.addRetriableFailure(buildFailed(event.exitCode))
+            REMOTE_CACHE_EVICTED -> pendingDiagnostics.addRetriableFailure(ctx.writer, buildFailed(event.exitCode))
             else -> ctx.writer.error(buildFailed(event.exitCode))
         }
 

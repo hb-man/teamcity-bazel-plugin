@@ -70,7 +70,7 @@ private fun runBesGrpcServerMode(
             grpcServer,
             options.verbosity,
             options.reportTargetLogToBuildLog,
-            GrpcEventHandlerChain(BuildEventHandlerChain(pendingDiagnostics)),
+            GrpcEventHandlerChain(BuildEventHandlerChain(pendingDiagnostics), pendingDiagnostics),
             pendingDiagnostics,
         )
 

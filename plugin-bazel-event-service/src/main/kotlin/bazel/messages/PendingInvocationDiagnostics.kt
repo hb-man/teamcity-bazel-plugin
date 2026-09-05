@@ -24,28 +24,41 @@ class PendingInvocationDiagnostics {
     private var bufferedDetailChars = 0
     private var dropped = 0
     private var bazelRetries = false
+    private var finishedFlow: FinishedFlow? = null
 
     /** [details] is only evaluated when there is room for it, since producing it reads files. */
     fun addCompilationError(
+        writer: MessageWriter,
         summary: String,
         details: () -> String,
-    ) = synchronized(lock) { buffer { Diagnostic.CompilationError(summary, charged(details)) } }
+    ) = synchronized(lock) { buffer { Diagnostic.CompilationError(writer, summary, charged(details)) } }
 
     fun addErrorMessage(
+        writer: MessageWriter,
         text: String,
         hasPrefix: Boolean = true,
-    ) = synchronized(lock) { buffer { Diagnostic.ErrorMessage(charged { text }, hasPrefix) } }
+    ) = synchronized(lock) { buffer { Diagnostic.ErrorMessage(writer, charged { text }, hasPrefix) } }
 
     /**
      * For a `BuildFinished` carrying the exit code Bazel retries: [text] is kept in case this
      * attempt turns out to be the last one, and the flag marks a `BuildStarted` that follows as a
      * retry rather than as another build.
      */
-    fun addRetriableFailure(text: String) =
-        synchronized(lock) {
-            bazelRetries = true
-            buffer { Diagnostic.ErrorMessage(charged { text }, hasPrefix = true) }
-        }
+    fun addRetriableFailure(
+        writer: MessageWriter,
+        text: String,
+    ) = synchronized(lock) {
+        bazelRetries = true
+        buffer { Diagnostic.ErrorMessage(writer, charged { text }, hasPrefix = true) }
+    }
+
+    /** Keep the invocation's flow open until its diagnostics have been reported or discarded. */
+    fun deferFlowFinished(
+        writer: MessageWriter,
+        flowId: String,
+    ) = synchronized(lock) {
+        finishedFlow = FinishedFlow(writer, flowId)
+    }
 
     /**
      * The previous invocation is over. If it ended the way Bazel retries, this one supersedes it and
@@ -73,7 +86,7 @@ class PendingInvocationDiagnostics {
 
     private fun take(): Buffered =
         synchronized(lock) {
-            Buffered(pending.toList(), dropped, bazelRetries).also { reset() }
+            Buffered(pending.toList(), dropped, bazelRetries, finishedFlow).also { reset() }
         }
 
     private fun discard(
@@ -86,6 +99,7 @@ class PendingInvocationDiagnostics {
                     "${buffered.count} failure(s) reported by the superseded attempt are ignored.",
             )
         }
+        buffered.finishedFlow?.report()
     }
 
     private fun report(
@@ -95,12 +109,12 @@ class PendingInvocationDiagnostics {
         buffered.diagnostics.forEach {
             when (it) {
                 is Diagnostic.CompilationError -> {
-                    writer.compilationStarted(it.summary)
-                    writer.error(it.details, hasPrefix = false)
-                    writer.compilationFinished(it.summary)
+                    it.writer.compilationStarted(it.summary)
+                    it.writer.error(it.details, hasPrefix = false)
+                    it.writer.compilationFinished(it.summary)
                 }
 
-                is Diagnostic.ErrorMessage -> writer.error(it.text, hasPrefix = it.hasPrefix)
+                is Diagnostic.ErrorMessage -> it.writer.error(it.text, hasPrefix = it.hasPrefix)
             }
         }
 
@@ -110,6 +124,7 @@ class PendingInvocationDiagnostics {
                     "more than $MAX_BUFFERED_REPORTS failures in a single invocation.",
             )
         }
+        buffered.finishedFlow?.report()
     }
 
     private inline fun buffer(diagnostic: () -> Diagnostic) {
@@ -144,12 +159,14 @@ class PendingInvocationDiagnostics {
         bufferedDetailChars = 0
         dropped = 0
         bazelRetries = false
+        finishedFlow = null
     }
 
     private class Buffered(
         val diagnostics: List<Diagnostic>,
         val dropped: Int,
         val bazelRetries: Boolean,
+        val finishedFlow: FinishedFlow?,
     ) {
         val count: Int
             get() = diagnostics.size + dropped
@@ -158,14 +175,23 @@ class PendingInvocationDiagnostics {
     private sealed interface Diagnostic {
         /** Becomes a TeamCity build problem, which is what makes premature reporting unrecoverable. */
         data class CompilationError(
+            val writer: MessageWriter,
             val summary: String,
             val details: String,
         ) : Diagnostic
 
         data class ErrorMessage(
+            val writer: MessageWriter,
             val text: String,
             val hasPrefix: Boolean,
         ) : Diagnostic
+    }
+
+    private class FinishedFlow(
+        val writer: MessageWriter,
+        val id: String,
+    ) {
+        fun report() = writer.flowFinished(id)
     }
 
     private companion object {

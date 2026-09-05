@@ -10,15 +10,17 @@ import bazel.handlers.grpc.InvocationAttemptFinishedHandler
 import bazel.handlers.grpc.InvocationAttemptStartedHandler
 import bazel.handlers.grpc.NotProcessedEventHandler
 import bazel.handlers.grpc.PackedBazelEventHandler
+import bazel.messages.PendingInvocationDiagnostics
 
 class GrpcEventHandlerChain(
     buildEventHandlerChain: BuildEventHandlerChain,
+    pendingDiagnostics: PendingInvocationDiagnostics,
 ) : GrpcEventHandler {
     private val handlers =
         listOf(
             BuildEnqueuedHandler(),
             InvocationAttemptStartedHandler(),
-            InvocationAttemptFinishedHandler(),
+            InvocationAttemptFinishedHandler(pendingDiagnostics),
             PackedBazelEventHandler(buildEventHandlerChain),
             BuildFinishedHandler(),
             ComponentStreamFinishedHandler(),

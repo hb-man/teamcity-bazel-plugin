@@ -29,6 +29,7 @@ class ActionExecutedHandler(
 
         if (!event.success) {
             pendingDiagnostics.addCompilationError(
+                writer = ctx.writer,
                 summary = "$actionName failed to execute.",
                 details = { getActionDetails(event, ctx.verbosity, ctx.writer) },
             )
