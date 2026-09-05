@@ -13,6 +13,7 @@ import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.nio.file.StandardWatchEventKinds.ENTRY_CREATE
 import java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -49,7 +50,7 @@ class BinaryFileEventStream(
     ) {
         private val disposed = AtomicBoolean()
         private var sequenceNumber: Long = 0
-        private var streamPrefix: ByteArray? = null
+        private var streamIdentity: ByteArray? = null
 
         /**
          * How a Bazel event stream is told apart from the one that replaces it on a retry.
@@ -60,13 +61,14 @@ class BinaryFileEventStream(
          * on its own — the size does not shrink observably when the new stream grows past the old
          * one between two polls, and the file identity survives a truncation in place.
          *
-         * The comparison spans the whole first event rather than a fixed number of bytes because
+         * The identity covers the whole first event rather than a fixed number of bytes because
          * `BuildEvent` puts `id` and the announced `children` — identical across attempts of one
-         * command — before the payload holding the uuid.
+         * command — before the payload holding the uuid. Hashing it through a small buffer keeps
+         * the retained identity and the temporary allocation bounded for large target patterns.
          */
-        private fun currentStreamPrefix(): ByteArray? =
+        private fun currentStreamIdentity(): ByteArray? =
             runCatching {
-                FileChannel.open(binaryFile, StandardOpenOption.READ).use { streamPrefixOf(it) }
+                FileChannel.open(binaryFile, StandardOpenOption.READ).use { streamIdentityOf(it) }
             }.getOrNull()
 
         /**
@@ -79,18 +81,23 @@ class BinaryFileEventStream(
          * describe the new file, every later comparison would match, and the reader would stay on
          * the unlinked one for good.
          */
-        private fun streamPrefixOf(channel: FileChannel): ByteArray? {
-            val length = firstEventLength(channel)?.coerceAtMost(STREAM_PREFIX_MAX_BYTES.toLong())?.toInt() ?: return null
-            if (length <= 0 || channel.size() < length) return null
+        private fun streamIdentityOf(channel: FileChannel): ByteArray? {
+            val length = firstEventLength(channel) ?: return null
+            if (channel.size() < length) return null
 
-            val buffer = ByteBuffer.allocate(length)
+            val digest = MessageDigest.getInstance("SHA-256")
+            val buffer = ByteBuffer.allocate(STREAM_IDENTITY_BUFFER_BYTES)
             var offset = 0L
-            while (buffer.hasRemaining()) {
+            while (offset < length) {
+                buffer.clear()
+                buffer.limit(minOf(buffer.capacity().toLong(), length - offset).toInt())
                 val read = channel.read(buffer, offset)
                 if (read <= 0) return null
                 offset += read
+                buffer.flip()
+                digest.update(buffer)
             }
-            return buffer.array()
+            return digest.digest()
         }
 
         private fun firstEventLength(channel: FileChannel): Long? = peekMessageSize(channel, 0)?.let(::framedLength)
@@ -103,13 +110,13 @@ class BinaryFileEventStream(
             channel: FileChannel,
             onEvent: (Result) -> Unit,
         ): FileChannel {
-            val beingRead = streamPrefix
+            val beingRead = streamIdentity
             if (beingRead == null) {
-                streamPrefix = streamPrefixOf(channel)
+                streamIdentity = streamIdentityOf(channel)
                 return channel
             }
 
-            val atPath = currentStreamPrefix()
+            val atPath = currentStreamIdentity()
             if (atPath == null || atPath.contentEquals(beingRead)) {
                 return channel
             }
@@ -117,7 +124,7 @@ class BinaryFileEventStream(
             messageWriter.trace("Bazel wrote a new event stream, reading it from the beginning")
             runCatching { channel.close() }
             val reopened = FileChannel.open(binaryFile, StandardOpenOption.READ)
-            streamPrefix = streamPrefixOf(reopened)
+            streamIdentity = streamIdentityOf(reopened)
             onEvent(Result.StreamRestarted)
             return reopened
         }
@@ -239,9 +246,7 @@ class BinaryFileEventStream(
 
         companion object {
             private const val MAX_VARINT_SIZE = 5
-
-            /** Keeps an implausible first event from being held in memory on every poll. */
-            private const val STREAM_PREFIX_MAX_BYTES = 128 * 1024
+            private const val STREAM_IDENTITY_BUFFER_BYTES = 8 * 1024
         }
     }
 }

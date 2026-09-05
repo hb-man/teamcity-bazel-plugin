@@ -313,6 +313,36 @@ class BinaryFileEventStreamTest {
     }
 
     /**
+     * A normal Bazel command can put thousands of target labels in the first event before the
+     * `BuildStarted` payload. The invocation uuid can therefore be more than 128 KiB into the
+     * frame, beyond the old fixed prefix used to identify the stream.
+     */
+    @Test
+    fun tellsLargeBuildStartedEventsApartAfterInPlaceTruncation() {
+        val file = tempDir.resolve("events.bin")
+        val firstUuid = "11111111-1111-1111-1111-111111111111"
+        val secondUuid = "22222222-2222-2222-2222-222222222222"
+
+        val firstAttempt = startedEvent(uuid = firstUuid, targetCount = 10_000)
+        val firstBytes = framed(firstAttempt)
+        assertTrue(firstBytes.size > 128 * 1024, "The uuid must follow the old fixed prefix")
+        Files.write(file, firstBytes)
+
+        Reader(file).use { reader ->
+            reader.awaitEvents(1)
+
+            val secondBytes = framed(startedEvent(uuid = secondUuid, targetCount = 10_000), makeEvent(42))
+            Files.write(file, secondBytes, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)
+
+            reader.awaitEvents(2)
+            reader.awaitTrailingEvents(42)
+            assertEquals(reader.startedUuids, listOf(firstUuid, secondUuid))
+            reader.assertSawRestart()
+            reader.assertNoErrors()
+        }
+    }
+
+    /**
      * The retry may also replace the file instead of truncating it in place. The open channel then
      * still refers to the old file, whose size never changes again, so the reader would wait
      * forever on a stream nobody writes to unless it reopens from the path.
@@ -392,6 +422,17 @@ class BinaryFileEventStreamTest {
         val opaqueCounts: List<Int>
             get() = synchronized(events) { events.map { it.event.id.progress.opaqueCount } }
 
+        val startedUuids: List<String>
+            get() =
+                synchronized(events) {
+                    events.mapNotNull {
+                        it.event
+                            .takeIf { event -> event.hasStarted() }
+                            ?.started
+                            ?.uuid
+                    }
+                }
+
         fun awaitEvents(count: Int) =
             assertTrue(
                 arrived.tryAcquire(count, TIMEOUT_SECONDS, TimeUnit.SECONDS),
@@ -429,7 +470,10 @@ class BinaryFileEventStreamTest {
     ) = Files.newByteChannel(file, StandardOpenOption.WRITE).use { it.write(ByteBuffer.wrap(bytes)) }
 
     /** A first BEP event as Bazel writes it: announced children first, then the payload with the uuid. */
-    private fun startedEvent(uuid: String): BuildEventStreamProtos.BuildEvent =
+    private fun startedEvent(
+        uuid: String,
+        targetCount: Int = 1,
+    ): BuildEventStreamProtos.BuildEvent =
         buildEvent {
             idBuilder.startedBuilder
             addChildrenBuilder().unstructuredCommandLineBuilder
@@ -437,7 +481,9 @@ class BinaryFileEventStreamTest {
             addChildrenBuilder().structuredCommandLineBuilder.commandLineLabel = "canonical"
             addChildrenBuilder().optionsParsedBuilder
             addChildrenBuilder().workspaceStatusBuilder
-            addChildrenBuilder().patternBuilder.addPattern("//plugins/bazel/integrationTests/e2e:all")
+            addChildrenBuilder().patternBuilder.apply {
+                repeat(targetCount) { addPattern("//plugins/bazel/integrationTests/e2e:target_$it") }
+            }
             addChildrenBuilder().buildFinishedBuilder
             startedBuilder.apply {
                 this.uuid = uuid
