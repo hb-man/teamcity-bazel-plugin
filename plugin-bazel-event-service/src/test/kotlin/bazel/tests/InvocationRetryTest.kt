@@ -36,11 +36,11 @@ class InvocationRetryTest {
     fun doesNotReportFailuresOfAnAttemptSupersededByARetry() {
         handle(buildStarted())
         handle(failedAction())
-        handle(buildFinished(REMOTE_CACHE_EVICTED, "REMOTE_CACHE_EVICTED"))
+        handle(buildFinished(REMOTE_CACHE_EVICTED))
 
         // Bazel retries: a second BuildStarted supersedes everything the first attempt reported
         handle(buildStarted())
-        handle(buildFinished(0, "SUCCESS"))
+        handle(buildFinished(0))
         pendingDiagnostics.flush(writer)
 
         assertFalse(
@@ -60,10 +60,10 @@ class InvocationRetryTest {
     @Test
     fun reportsTheExitCodeOfTheLastAttemptOnly() {
         handle(buildStarted())
-        handle(buildFinished(REMOTE_CACHE_EVICTED, "REMOTE_CACHE_EVICTED"))
+        handle(buildFinished(REMOTE_CACHE_EVICTED))
 
         handle(buildStarted())
-        handle(buildFinished(1, "BUILD_FAILURE"))
+        handle(buildFinished(1))
         pendingDiagnostics.flush(writer)
 
         assertFalse(
@@ -81,11 +81,11 @@ class InvocationRetryTest {
     fun reportsFailuresOfTheLastAttempt() {
         handle(buildStarted())
         handle(failedAction())
-        handle(buildFinished(REMOTE_CACHE_EVICTED, "REMOTE_CACHE_EVICTED"))
+        handle(buildFinished(REMOTE_CACHE_EVICTED))
 
         handle(buildStarted())
         handle(failedAction())
-        handle(buildFinished(1, "BUILD_FAILURE"))
+        handle(buildFinished(1))
         pendingDiagnostics.flush(writer)
 
         assertEquals(
@@ -107,11 +107,11 @@ class InvocationRetryTest {
     fun reportsTheLastAttemptWhenRetriesAreExhausted() {
         handle(buildStarted())
         handle(failedAction())
-        handle(buildFinished(REMOTE_CACHE_EVICTED, "REMOTE_CACHE_EVICTED"))
+        handle(buildFinished(REMOTE_CACHE_EVICTED))
 
         handle(buildStarted())
         handle(failedAction())
-        handle(buildFinished(REMOTE_CACHE_EVICTED, "REMOTE_CACHE_EVICTED"))
+        handle(buildFinished(REMOTE_CACHE_EVICTED))
         pendingDiagnostics.flush(writer)
 
         assertEquals(
@@ -145,11 +145,11 @@ class InvocationRetryTest {
     fun reportsTheFailuresOfAnEarlierUnrelatedBuild() {
         handle(buildStarted())
         handle(failedAction())
-        handle(buildFinished(1, "BUILD_FAILURE"))
+        handle(buildFinished(1))
 
         // A second, independent build starts on the same server
         handle(buildStarted())
-        handle(buildFinished(0, "SUCCESS"))
+        handle(buildFinished(0))
         pendingDiagnostics.flush(writer)
 
         assertEquals(
@@ -167,7 +167,7 @@ class InvocationRetryTest {
     fun reportsFailuresWhenThereIsNoRetry() {
         handle(buildStarted())
         handle(failedAction())
-        handle(buildFinished(1, "BUILD_FAILURE"))
+        handle(buildFinished(1))
         pendingDiagnostics.flush(writer)
 
         assertEquals(
@@ -189,7 +189,7 @@ class InvocationRetryTest {
         pendingDiagnostics.discardSuperseded(writer)
 
         handle(buildStarted())
-        handle(buildFinished(0, "SUCCESS"))
+        handle(buildFinished(0))
         pendingDiagnostics.flush(writer)
 
         assertFalse(
@@ -223,15 +223,18 @@ class InvocationRetryTest {
             }
         }
 
-    private fun buildFinished(
-        code: Int,
-        name: String,
-    ) = buildEvent {
-        finishedBuilder.exitCodeBuilder.apply {
-            this.code = code
-            this.name = name
+    private fun buildFinished(code: Int) =
+        buildEvent {
+            finishedBuilder.exitCodeBuilder.apply {
+                this.code = code
+                name =
+                    when (code) {
+                        0 -> "SUCCESS"
+                        REMOTE_CACHE_EVICTED -> "REMOTE_CACHE_EVICTED"
+                        else -> "BUILD_FAILURE"
+                    }
+            }
         }
-    }
 
     private companion object {
         const val REMOTE_CACHE_EVICTED = 39

@@ -425,12 +425,7 @@ class BinaryFileEventStreamTest {
         val startedUuids: List<String>
             get() =
                 synchronized(events) {
-                    events.mapNotNull {
-                        it.event
-                            .takeIf { event -> event.hasStarted() }
-                            ?.started
-                            ?.uuid
-                    }
+                    events.mapNotNull { if (it.event.hasStarted()) it.event.started.uuid else null }
                 }
 
         fun awaitEvents(count: Int) =

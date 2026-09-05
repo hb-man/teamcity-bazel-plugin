@@ -144,7 +144,6 @@ class PendingInvocationDiagnostics {
     private fun charged(text: () -> String): String {
         val room = MAX_BUFFERED_DETAIL_CHARS - bufferedDetailChars
         if (room <= 0) {
-            bufferedDetailChars += OMITTED_DETAILS.length
             return OMITTED_DETAILS
         }
 

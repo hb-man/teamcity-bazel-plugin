@@ -53,18 +53,10 @@ class BinaryFileEventStream(
         private var streamIdentity: ByteArray? = null
 
         /**
-         * How a Bazel event stream is told apart from the one that replaces it on a retry.
-         *
-         * The stream is only ever appended to, so its opening bytes are stable while one invocation
-         * writes it and change as soon as another starts: the first event carries `BuildStarted`,
-         * whose `uuid` and start time are per invocation. Neither of the cheaper signals is enough
-         * on its own — the size does not shrink observably when the new stream grows past the old
-         * one between two polls, and the file identity survives a truncation in place.
-         *
-         * The identity covers the whole first event rather than a fixed number of bytes because
-         * `BuildEvent` puts `id` and the announced `children` — identical across attempts of one
-         * command — before the payload holding the uuid. Hashing it through a small buffer keeps
-         * the retained identity and the temporary allocation bounded for large target patterns.
+         * The first frame is stable within an invocation and contains its UUID and start time.
+         * Hash the whole frame: target-pattern children can put the UUID beyond any fixed prefix.
+         * A small buffer bounds memory use even for large target lists. File size alone cannot
+         * detect retries, since the replacement can grow past the old EOF between polls.
          */
         private fun currentStreamIdentity(): ByteArray? =
             runCatching {
@@ -72,14 +64,9 @@ class BinaryFileEventStream(
             }.getOrNull()
 
         /**
-         * Null until the whole first event is on disk. A partially written one would compare equal
-         * to the stream that replaces it, so there is nothing usable to record yet.
-         *
-         * Read through the reader's own channel, so that what is recorded describes the same file
-         * the events come from. Sampling through the path instead would leave the two out of step
-         * if Bazel replaced the file just after the channel was opened: the record would already
-         * describe the new file, every later comparison would match, and the reader would stay on
-         * the unlinked one for good.
+         * Returns null until the whole first frame is on disk. Record the identity through the
+         * active channel, so replacing the path cannot associate the new file's identity with an
+         * old, unlinked channel.
          */
         private fun streamIdentityOf(channel: FileChannel): ByteArray? {
             val length = firstEventLength(channel) ?: return null
