@@ -24,7 +24,7 @@ class PendingInvocationDiagnostics {
     private var bufferedDetailChars = 0
     private var dropped = 0
     private var bazelRetries = false
-    private var finishedFlow: FinishedFlow? = null
+    private val finishedFlows = mutableListOf<FinishedFlow>()
 
     /** [details] is only evaluated when there is room for it, since producing it reads files. */
     fun addCompilationError(
@@ -57,7 +57,7 @@ class PendingInvocationDiagnostics {
         writer: MessageWriter,
         flowId: String,
     ) = synchronized(lock) {
-        finishedFlow = FinishedFlow(writer, flowId)
+        finishedFlows.add(FinishedFlow(writer, flowId))
     }
 
     /**
@@ -86,7 +86,7 @@ class PendingInvocationDiagnostics {
 
     private fun take(): Buffered =
         synchronized(lock) {
-            Buffered(pending.toList(), dropped, bazelRetries, finishedFlow).also { reset() }
+            Buffered(pending.toList(), dropped, bazelRetries, finishedFlows.toList()).also { reset() }
         }
 
     private fun discard(
@@ -99,7 +99,7 @@ class PendingInvocationDiagnostics {
                     "${buffered.count} failure(s) reported by the superseded attempt are ignored.",
             )
         }
-        buffered.finishedFlow?.report()
+        buffered.finishedFlows.forEach { it.report() }
     }
 
     private fun report(
@@ -124,7 +124,7 @@ class PendingInvocationDiagnostics {
                     "more than $MAX_BUFFERED_REPORTS failures in a single invocation.",
             )
         }
-        buffered.finishedFlow?.report()
+        buffered.finishedFlows.forEach { it.report() }
     }
 
     private inline fun buffer(diagnostic: () -> Diagnostic) {
@@ -159,14 +159,14 @@ class PendingInvocationDiagnostics {
         bufferedDetailChars = 0
         dropped = 0
         bazelRetries = false
-        finishedFlow = null
+        finishedFlows.clear()
     }
 
     private class Buffered(
         val diagnostics: List<Diagnostic>,
         val dropped: Int,
         val bazelRetries: Boolean,
-        val finishedFlow: FinishedFlow?,
+        val finishedFlows: List<FinishedFlow>,
     ) {
         val count: Int
             get() = diagnostics.size + dropped

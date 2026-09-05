@@ -57,6 +57,20 @@ class BesGrpcServerTest {
     }
 
     @Test
+    fun closesEveryFlowWhenInvocationsOverlap() {
+        startServer().use {
+            startInvocation("A")
+            startInvocation("B")
+            lifecycle("A", 4) { invocationAttemptFinishedBuilder.invocationStatusBuilder.result = BuildStatus.Result.COMMAND_SUCCEEDED }
+            lifecycle("B", 5) { invocationAttemptFinishedBuilder.invocationStatusBuilder.result = BuildStatus.Result.COMMAND_SUCCEEDED }
+        }
+
+        val finished = messages.filter { it.messageName == "flowFinished" }
+        assertEquals(finished.map { it.flowId }, listOf("A", "B"))
+        assertEquals(finished.map { it.creationTimestamp?.timestamp?.time }, listOf(4_000L, 5_000L))
+    }
+
+    @Test
     fun closesASupersededFlowWithoutReportingItsCompilationErrors() {
         startServer().use {
             failedInvocation("A", exitCode = 39)
